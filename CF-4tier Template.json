@@ -1,0 +1,372 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+ 
+  "Parameters":{
+     "VpcCIDR":{
+         "Type":"String",
+         "Description": "CIDR block for the VPC",
+         "Default":"172.0.0.0/20"
+ 
+     },
+     "PublicSubnetCIDR":{
+         "Type": "String",
+         "Description": "CIDR for pub subnet",
+         "Default": "172.0.1.0/24"
+     },
+     "AppPrivateSubnetCIDR":{
+         "Type": "String",
+         "Default": "172.0.2.0/24"
+     },
+     "DBPrivateSubnetCIDR":{
+         "Type": "String",
+         "Default": "172.0.3.0/24"
+     },
+     "myDefaultIGW":{
+         "Type": "String"
+     },
+     "DB": {
+         "Type": "String",
+         "Default": "mydatabase"
+       },
+     "DBUser": {
+         "Type": "String",
+         "Default": "admin"
+       },
+     "DBPassword": {
+         "Type": "String",
+         "NoEcho": true,
+         "Default": "Admin123"
+       },
+     "DBInstanceClass": {
+         "Type": "String",
+         "Default": "db.t3.micro"
+       },
+     "HostedZoneName":{
+         "Type" :"String",
+         "Default":"OkikiolaExample.com"
+ 
+       },
+     "HostedZoneType":{
+         "Type" :"String",
+         "Default":"A"
+       },
+     "HostedZoneTTL":{
+         "Type":"String",
+         "Default": "300"
+       },
+     "RecordName":{
+         "Type": "String",
+         "Default": "compay.OkikiolaExample.com"
+       }
+ 
+  },
+ 
+ 
+  "Resources":{
+     "DemoVPC":{
+         "Type": "AWS::EC2::VPC",
+         "Properties":{
+             "CidrBlock":{ "Ref": "VpcCIDR"},
+             "EnableDnsSupport": true
+             
+     
+         }
+     },
+ 
+     "PublicSubnet":{
+         "Type": "AWS::EC2::Subnet",
+         "DependsOn": "myPubSubRoute",
+         "Properties":{
+             "VpcId":{"Ref": "DemoVPC"},
+             "CidrBlock":{"Ref": "PublicSubnetCIDR"},
+             "MapPublicIpOnLaunch": true,
+             "AvailabilityZone":{"Fn::Select": ["0",{"Fn::GetAZs": ""}]}
+         }
+     },
+
+     "PrivateSubnet1": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": {
+                "Ref": "AWS::Region"
+              }
+            }
+          ]
+        },
+        "VpcId": { "Ref": "DemoVPC" },
+        "CidrBlock": {"Ref":"AppPrivateSubnetCIDR"}
+      }
+    },
+    "PrivateSubnet2": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "AvailabilityZone": {
+          "Fn::Select": [
+            1,
+            {
+              "Fn::GetAZs": {
+                "Ref": "AWS::Region"
+              }
+            }
+          ]
+        },
+        "VpcId": { "Ref": "DemoVPC" },
+        "CidrBlock": {"Ref":"DBPrivateSubnetCIDR"}
+      }
+    },
+     "DBSubngroup": {
+      "Type": "AWS::RDS::DBSubnetGroup",
+      "Properties": {
+        "DBSubnetGroupName": "DBSubngroup",
+        "DBSubnetGroupDescription": "Subnet Group",
+        "SubnetIds": [
+          { "Ref": "PrivateSubnet1" },
+          { "Ref": "PrivateSubnet2" }
+        ]
+      }
+    },
+     "DefaultIGW":{
+         "Type": "AWS::EC2::InternetGateway",
+         "DependsOn": "DemoVPC"
+     },
+     "AttachIGW":{
+         "Type": "AWS::EC2::VPCGatewayAttachment",
+         "Properties":{
+             "InternetGatewayId": {"Ref": "DefaultIGW"},
+             "VpcId": {"Ref": "DemoVPC"}
+         }
+ 
+     },
+     "myRouteTable":{
+         "Type": "AWS::EC2::RouteTable",
+         "Properties":{
+           "VpcId": {"Ref": "DemoVPC"}
+       }
+             
+     },
+     "myPrivRouteTable":{
+      "Type": "AWS::EC2::RouteTable",
+         "Properties":{
+           "VpcId": {"Ref": "DemoVPC"}
+       }
+            
+
+     },
+      "myPubSubRoute":{
+          "Type": "AWS::EC2::Route",
+          
+          "Properties":{
+              "RouteTableId": {"Ref" : "myRouteTable"},
+              "DestinationCidrBlock" : "0.0.0.0/0",
+              "GatewayId":{"Ref" : "DefaultIGW"} 
+          }
+      },
+    "RouteNATGateway" : {
+         "DependsOn": [ "NATGateway" ],
+         "Type" : "AWS::EC2::Route",
+         "Properties" : {
+            "RouteTableId" : { "Ref" : "myPrivRouteTable" },
+            "DestinationCidrBlock" :"0.0.0.0/0",
+            "NatGatewayId" : { "Ref" : "NATGateway" }
+         }
+      },
+     "NATGateway" : {
+         "Type" : "AWS::EC2::NatGateway",
+         "Properties" : {
+            "AllocationId" : { 
+                "Fn::GetAtt" : ["NATGatewayEIP", "AllocationId"] 
+            },
+            "SubnetId" : { 
+                "Ref" : "PublicSubnet" 
+           }
+          
+         }
+     },
+      "NATGatewayEIP" : {
+         "Type" : "AWS::EC2::EIP",
+         "Properties" : {
+            "Domain" : "DemoVPC"
+         }
+      },
+      
+     "WebInstanceSG" : {
+         "Type" : "AWS::EC2::SecurityGroup",
+         "Properties" : {
+             "GroupDescription" : "Allow http and ssh ",
+             "VpcId" : {"Ref" : "DemoVPC"},
+             "SecurityGroupIngress" : [{
+                 "IpProtocol" : "tcp",
+                 "FromPort" : 80,
+                 "ToPort" : 80,
+                 "CidrIp" : "0.0.0.0/0"
+             },
+             {
+                 "IpProtocol" : "tcp",
+                 "FromPort": 22,
+                 "ToPort" : 22,
+                 "CidrIp": "0.0.0.0/0"
+             }
+         ],
+             "SecurityGroupEgress" : [{
+                 "IpProtocol" : "tcp",
+                 "FromPort" : 80,
+                 "ToPort" : 80,
+                 "CidrIp" : "0.0.0.0/0"
+             },
+             {
+                 "IpProtocol":"tcp",
+                 "FromPort":22,
+                 "ToPort":22,
+                 "CidrIp":"0.0.0.0/0"
+             }]
+         }
+     },
+     "AppInstanceSG":{
+         "Type" : "AWS::EC2::SecurityGroup",
+         "Properties" : {
+             "GroupDescription" : "Allow ssh access from our public subnet",
+             "VpcId" : {"Ref" : "DemoVPC"},
+             "SecurityGroupIngress" : [{
+                 "IpProtocol" : "tcp",
+                 "FromPort": 22,
+                 "ToPort" : 22,
+                 "CidrIp": "172.0.1.0/24"
+             }
+         ]
+         }
+        
+     },
+     "DBSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupName": "Example Security Group",
+        "GroupDescription": "RDS traffic",
+        "VpcId": { "Ref": "DemoVPC" },
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ]
+      }
+    },
+    "DBSecurityGroupIngress": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "DependsOn": "DBSecurityGroup",
+      "Properties": {
+        "GroupId": { "Ref": "DBSecurityGroup" },
+        "IpProtocol": "tcp",
+        "FromPort": "0",
+        "ToPort": "3306",
+        "SourceSecurityGroupId": { "Ref": "DBSecurityGroup" }
+      }
+    },
+  
+     "MyWebInstance": {
+         "Type": "AWS::EC2::Instance",
+         "Properties": {
+           "InstanceType": "t2.micro",
+           "ImageId": "ami-0440d3b780d96b29d",
+           
+           "BlockDeviceMappings": [
+             {
+               "DeviceName": "/dev/sda1",
+               "Ebs": {
+                 "VolumeSize": 8,
+                 "VolumeType": "gp3"
+               }
+               }
+             ],
+             "NetworkInterfaces": [
+                 {
+                   "AssociatePublicIpAddress": true,
+                   "DeviceIndex": 0,
+                   "SubnetId": { "Ref": "PublicSubnet" },
+                   "GroupSet":[{"Ref":"WebInstanceSG"}]
+                 }
+               ]
+     
+      
+             }
+
+      },
+         
+     "MyAppInstance": {
+         "Type": "AWS::EC2::Instance",
+         "Properties": {
+           "InstanceType": "t2.micro",
+           "ImageId": "ami-0440d3b780d96b29d", 
+           
+           "BlockDeviceMappings": [
+             {
+               "DeviceName": "/dev/sda1",
+               "Ebs": {
+                 "VolumeSize": 8,
+                 "VolumeType": "gp2"
+               }
+               }
+             ],
+             "NetworkInterfaces": [
+                 {
+                   "AssociatePublicIpAddress": true,
+                   "DeviceIndex": 0,
+                   "SubnetId": { "Ref": "PrivateSubnet1" },
+                   "GroupSet": [{"Ref":"AppInstanceSG"}]
+                  
+                 }
+               ]
+ 
+ 
+     }
+     },
+     "MyDBInstance": {
+         "Type": "AWS::RDS::DBInstance",
+         "Properties": {
+          "VPCSecurityGroups" : [
+            {"Ref" : "DBSecurityGroup"} ],
+           "DBSubnetGroupName": { "Ref": "DBSubngroup" },
+           "DBInstanceClass": {"Ref" : "DBInstanceClass"},
+           "Engine": "mysql",
+           "DBName": { "Ref": "DB" },
+           "MasterUsername": { "Ref": "DBUser" },
+           "MasterUserPassword": { "Ref": "DBPassword" },
+           "AllocatedStorage": "20",
+           "DBInstanceIdentifier": "mydbinstance",
+           "DeletionProtection": "true",
+           "PubliclyAccessible": "false"
+           
+ 
+          
+           
+         }
+       },
+       "R53HostedZone":{
+         "Type" : "AWS::Route53::HostedZone", 
+         "Properties":{
+             "Name":{"Ref" : "HostedZoneName"}
+     
+         }
+       },
+       "RecordSet1": {
+         "Type": "AWS::Route53::RecordSet",
+         
+         "Properties": {
+           "HostedZoneId": {"Ref":"R53HostedZone"},
+           "Region":"us-east-1",
+           "Name": {"Ref": "RecordName"},
+           "Type": {"Ref":"HostedZoneType"},
+           "TTL": {"Ref":"HostedZoneTTL"},
+           "SetIdentifier": "exampleSetIdentifier",
+           "ResourceRecords": [{ "Fn::GetAtt": ["MyWebInstance", "PublicIp"] }]
+            
+           
+           
+         }
+       }
+ }
+ }
+ 
